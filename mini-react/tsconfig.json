@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "outDir": "dist", // 输出目录
+    "target": "es2016", // 编译后的js代码的目标版本
+    "jsx": "react",  // 如何处理.tsx文件中的jsx代码 react表示：React.createElement
+    "jsxFactory": "MiniReact.createElement", // 指定生成jsx元素的工厂函数 可以指定render function的名字
+    "allowJs": true, // 允许在ts项目中包含js文件 
+    "strict": true,    // 严格的类型检查
+    "skipLibCheck": true   // 跳过对.d.ts类型声明文件（库文件）的类型检查
+  }
+}
