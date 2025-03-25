@@ -25,7 +25,7 @@
   }
 
   // 全局保存状态，即使工作被中断，状态也会保留
-  let nextUnitOfWork = null; // 下一个工作单元
+  let nextUnitOfWork = null; // 是下一个需要处理的工作单元（Fiber 节点）。初始化时，它指向 wipRoot，即当前的根节点。
   let wipRoot = null; // 正在处理的fiber的根节点
   let currentRoot = null; // 之前历史的fiber链表的根节点
   let deletions = null; // 要删除的节点
@@ -42,11 +42,12 @@
     // 在渲染的时候初始化
     deletions = [];
 
-    nextUnitOfWork = wipRoot; // 第一个工作单元
+    nextUnitOfWork = wipRoot; // 初始化时指向wipRoot，第一个工作单元
   }
 
   // 工作循环函数，用来执行工作单元，浏览器空闲的时候调用
-  function workloop(deadline) {
+  function workLoop(deadline) {
+    // shouldYield用于判断当前工作是否应该暂停
     let shouldYield = false;
     while (nextUnitOfWork && !shouldYield) {
       nextUnitOfWork = performUnitOfWork(nextUnitOfWork);
@@ -57,8 +58,10 @@
     if (!nextUnitOfWork && wipRoot) {
       commitRoot();
     }
-    requestIdleCallback(workloop);
+    requestIdleCallback(workLoop);
   }
+
+  requestIdleCallback(workLoop);
 
   // 处理单个工作单元的函数
   function performUnitOfWork(fiber) {
@@ -70,42 +73,46 @@
       updateHostComponent(fiber);
     }
 
+    // 有子节点处理第一个子节点
     if (fiber.child) {
       return fiber.child;
     }
+    // 没有子节点检查当前节点的兄弟节点
     let nextFiber = fiber;
     while (nextFiber) {
       if (nextFiber.sibling) {
         return nextFiber.sibling;
       }
+      // 没有就找父节点的下一个兄弟节点
       nextFiber = nextFiber.return;
     }
   }
 
-  let wipFiber = null; // 当前正在工作的函数组件fiber
-  let stateHookindex = null; // 当前组件的hook索引
+  let wipFiber = null;
+  let stateHookIndex = null;
 
+  // 处理函数组件
   function updateFunctionComponent(fiber) {
     wipFiber = fiber;
-    stateHookindex = null;
-    wipFiber.stateHooks = []; // 存储state和effect的hooks
+    stateHookIndex = 0;
+    wipFiber.stateHooks = [];
     wipFiber.effectHooks = [];
 
-    const children = [fiber.type(fiber.props)]; // 执行函数获取渲染内容
+    const children = [fiber.type(fiber.props)];
     reconcileChildren(fiber, children);
   }
 
+  // 处理非函数组件
   function updateHostComponent(fiber) {
     if (!fiber.dom) {
-      fiber.dom = createDom(fiber); // 创建dom元素
+      fiber.dom = createDom(fiber);
     }
-
     reconcileChildren(fiber, fiber.props.children);
   }
 
   function createDom(fiber) {
     const dom =
-      fiber.type === "TEXT_ELEMENT"
+      fiber.type == "TEXT_ELEMENT"
         ? document.createTextNode("")
         : document.createElement(fiber.type);
 
@@ -114,17 +121,12 @@
     return dom;
   }
 
-  // 判断是不是事件处理器
   const isEvent = (key) => key.startsWith("on");
-  // 判断属性值是否改变
+  const isProperty = (key) => key !== "children" && !isEvent(key);
   const isNew = (prev, next) => (key) => prev[key] !== next[key];
-  // 判断是不是普通的属性(非事件处理器，也不是children属性)
-  const isProperty = (key) => !isEvent(key) && key !== "children";
-  // 判断属性是否删除
-  const isGone = (prev, next) => (key) => key in prev && !(key in next);
+  const isGone = (prev, next) => (key) => !(key in next);
 
   function updateDom(dom, prevProps, nextProps) {
-    // 1、移除旧的获变化的事件监听器
     Object.keys(prevProps)
       .filter(isEvent)
       .filter((key) => !(key in nextProps) || isNew(prevProps, nextProps)(key))
@@ -133,7 +135,6 @@
         dom.removeEventListener(eventType, prevProps[name]);
       });
 
-    // 2、移除旧的属性
     Object.keys(prevProps)
       .filter(isProperty)
       .filter(isGone(prevProps, nextProps))
@@ -141,7 +142,6 @@
         dom[name] = "";
       });
 
-    // 3、添加新的属性
     Object.keys(nextProps)
       .filter(isProperty)
       .filter(isNew(prevProps, nextProps))
@@ -149,7 +149,6 @@
         dom[name] = nextProps[name];
       });
 
-    // 4、添加新的事件监听器
     Object.keys(nextProps)
       .filter(isEvent)
       .filter(isNew(prevProps, nextProps))
@@ -159,46 +158,40 @@
       });
   }
 
-  // 处理子节点（比较和更新组件树）
   function reconcileChildren(wipFiber, elements) {
     let index = 0;
-    let oldFiber = wipFiber.alternate?.child; //旧树的第一个子节点
-    let prevSibling = null; // 构建兄弟节点连接
+    let oldFiber = wipFiber.alternate?.child;
+    let prevSibling = null;
 
     while (index < elements.length || oldFiber != null) {
       const element = elements[index];
       let newFiber = null;
 
-      // 比较新旧节点类型
       const sameType = element?.type == oldFiber?.type;
 
-      // 1、相同类型： 更新节点
       if (sameType) {
         newFiber = {
           type: oldFiber.type,
-          props: element.props, // 使用新的 props
-          dom: oldFiber.dom, // 复用旧的 DOM
-          return: wipFiber, // 指向父节点
-          alternate: oldFiber, // 指向旧节点
-          effectTag: "UPDATE", // 标记为更新
+          props: element.props,
+          dom: oldFiber.dom,
+          return: wipFiber,
+          alternate: oldFiber,
+          effectTag: "UPDATE",
         };
       }
-
       if (element && !sameType) {
         newFiber = {
           type: element.type,
           props: element.props,
-          dom: null, // 新建的节点还没有 DOM
+          dom: null,
           return: wipFiber,
           alternate: null,
-          effectTag: "PLACEMENT", // 标记为插入
+          effectTag: "PLACEMENT",
         };
       }
-
-      // 3. 旧节点：删除节点
       if (oldFiber && !sameType) {
-        oldFiber.effectTag = "DELETION"; // 标记为删除
-        deletions.push(oldFiber); // 加入删除队列
+        oldFiber.effectTag = "DELETION";
+        deletions.push(oldFiber);
       }
 
       if (oldFiber) {
@@ -216,7 +209,6 @@
     }
   }
 
-  // 实现useState
   function useState(initialState) {
     const currentFiber = wipFiber;
 
@@ -251,7 +243,6 @@
     return [stateHook.state, setState];
   }
 
-  // 实现useEffect
   function useEffect(callback, deps) {
     const effectHook = {
       callback,
@@ -261,11 +252,17 @@
     wipFiber.effectHooks.push(effectHook);
   }
 
+  // 实际上是在做commit阶段的事情：将更改应用到真实的 DOM 中，并处理所有副作用
   function commitRoot() {
+    // 删除操作
     deletions.forEach(commitWork);
+    // 提交子节点
     commitWork(wipRoot.child);
+    // 提交副作用
     commitEffectHooks();
+    // 更新当前根节点
     currentRoot = wipRoot;
+    // 清理
     wipRoot = null;
     deletions = [];
   }
@@ -301,6 +298,19 @@
     }
   }
 
+  function isDepsEqual(deps, newDeps) {
+    if (deps.length !== newDeps.length) {
+      return false;
+    }
+
+    for (let i = 0; i < deps.length; i++) {
+      if (deps[i] !== newDeps[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   function commitEffectHooks() {
     function runCleanup(fiber) {
       if (!fiber) return;
@@ -322,12 +332,12 @@
 
       fiber.effectHooks?.forEach((newHook, index) => {
         if (!fiber.alternate) {
-          hook.cleanup = hook.callback();
+          newHook.cleanup = newHook.callback();
           return;
         }
 
         if (!newHook.deps) {
-          hook.cleanup = hook.callback();
+          newHook.cleanup = newHook.callback();
         }
 
         if (newHook.deps.length > 0) {
@@ -345,19 +355,6 @@
 
     runCleanup(wipRoot);
     run(wipRoot);
-  }
-
-  function isDepsEqual(deps, newDeps) {
-    if (deps.length !== newDeps.length) {
-      return false;
-    }
-
-    for (let i = 0; i < deps.length; i++) {
-      if (deps[i] !== newDeps[i]) {
-        return false;
-      }
-    }
-    return true;
   }
 
   const MiniReact = {
