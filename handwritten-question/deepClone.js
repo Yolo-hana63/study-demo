@@ -12,6 +12,9 @@ function deepClone(obj, map = new WeakMap()) {
 
   map.set(obj, newObject);
 
+  // 可以使用Object.keys()代替for..in + hasOwnproperty()
+  // Object.keys(obj).forEach((key) => {});
+
   for (const key in obj) {
     if (obj.hasOwnProperty(key)) {
       if (typeof obj[key] === "object" && obj[key] !== null) {
